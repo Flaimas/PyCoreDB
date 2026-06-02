@@ -1,3 +1,29 @@
+import time
+
+def benchmark(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+
+        result = func(*args, **kwargs)
+
+        end_time = time.perf_counter()
+        print(f"Время выполениня функции {func.__name__}: {end_time - start_time}")
+        return result
+    return wrapper
+
+def access_control(role):
+    def check_role(func):
+        def wrapper(*args, **kwargs):
+            user = kwargs.get('current_user') if 'current_user' in kwargs else (args[1] if len(args) > 1 else None)
+
+            if user != 'admin':
+                raise PermissionError(f"Недостаточно прав пользователя {args[1]} для {func.__name__}")
+            
+            result = func(*args, **kwargs)
+            return result
+        return wrapper
+    return check_role
+
 class Record:
     def __init__(self, user_id, **kwargs):
         self.user_id = user_id
@@ -36,6 +62,7 @@ class Database:
         if item.user_id in self.users:
             raise ValueError(f"Ошибка! Объект с id={item.user_id} уже существует!")
 
+        self.log(f"Добавление юзера ID={item.user_id} в БД")
         self.users[item.user_id] = item
 
     def __enter__(self):
@@ -50,37 +77,64 @@ class Database:
             return False
         print(f"Выход из контекстного менеджера. Сохраненные изменения: {self.users}")
         return True
+    
+    @access_control(role='admin')
+    def delete_user(self, current_user, user_id):
+        print("Пользователь УСПЕШНО УДАЛЕН!")
+
+class BaseEngine:
+    def log(self, message):
+        print(f'[INFO]: Старт логгирования...')
+        super().log(message)
+
+class ConsoleLoggerMixin:
+    def log(self, message):
+        print(f'[INFO]: {message}')
+        super().log(message)
+
+class FileLoggerMixin:
+    def log(self, message):
+        print(f'[INFO]: Запись лога "{message}" в файл.')
+
+class SmartDatabase(BaseEngine, Database, ConsoleLoggerMixin, FileLoggerMixin):
+    pass
 
 class FilterIterator:
     def __init__(self, database, **kwargs):
         self.database = database
-        self.values = list(database.users.values())
+        self.values = iter(database.users.values())
         self.filters = kwargs
         self.cursor = 0
 
     def __iter__(self):
         return self
-
+    
     def __next__(self):
-        while self.cursor < len(self.values):
-            user = self.values[self.cursor]
-            self.cursor += 1
+        while True:
+            try:
+                user = next(self.values)
+            except StopIteration:
+                raise StopIteration
             if all(getattr(user, key, None) == value for key, value in self.filters.items()):
                 return user
-        raise StopIteration
+    
+    @benchmark
+    @staticmethod
+    def stream_data(data_source, batch_size, **kwargs):
+        batch = []
+        for i in FilterIterator(data_source, **kwargs):
+            batch.append(i)
+            if len(batch) == batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
 
 rec = Record(1,name='Svegrgay', age=16, pisipopi=23)
 rec2 = Record(2, name='Oleg')
 rec3 = Record(3, name='Sergay')
-print(rec==rec2)
-print(rec, rec2)
-print(repr(rec), repr(rec2))
 
-with Database() as db:
+with SmartDatabase() as db:
     db(rec)
     db(rec2)
     db(rec3)
-    db(Record(4, name='Slava', job='Drug seller'))
-
-for i in FilterIterator(db, name='Svegrgay', pisipopi=22):
-    print(i)
