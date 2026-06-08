@@ -9,6 +9,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=text("TIMEZONE('utc', now())"))
+    is_banned: Mapped[bool] = mapped_column(default=False, server_default="false")
 
     subscriptions: Mapped[list["Subscription"]] = relationship(
         back_populates="user",
